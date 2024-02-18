@@ -11,13 +11,8 @@ const app = express();
 const port = 3000;
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
-// CORS middleware
-app.use((req, res, next) => {
-  res.setHeader("Access-Control-Allow-Origin", "https://www.freecodecamp.org");
-  res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE");
-  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
-  next();
-});
+// Use CORS middleware with whitelist options
+app.use(cors());
 
 // Set the 'public' folder as the location for serving static files
 app.use(express.static(path.join(__dirname, "public")));
@@ -178,6 +173,19 @@ app.get("/api/users", async (req, res) => {
 // POST "/api/users/:_id/exercises"
 //
 ////////////////////////////////////////////////////////////////////////////////
+// Check date is correctly formatted
+function isDateFormatValid(dateString) {
+  // Define a regex pattern for yyyy-mm-dd format
+  const regexPattern = /^\d{4}-\d{2}-\d{2}$/;
+
+  // Use regex test method to check if the string matches the pattern
+  return regexPattern.test(dateString);
+}
+function isValidDuration(duration) {
+  // Check if the duration is a number and within the range 0 to 600 (inclusive)
+  const numericValue = parseInt(duration, 10);
+  return !isNaN(numericValue) && numericValue >= 0 && numericValue <= 600;
+}
 app.post("/api/users/:_id/exercises", async (req, res) => {
   // POST form data description, duration, and optionally date. If no date is supplied, the current date will be used.
   // RESPONSE returned from POST /api/users/:_id/exercises will be the user object with the exercise fields added.
@@ -188,18 +196,9 @@ app.post("/api/users/:_id/exercises", async (req, res) => {
   let { description, duration, date } = req.body;
   let { _id } = req.params;
 
-  // Check date is correctly formatted
-  function isDateFormatValid(dateString) {
-    // Define a regex pattern for yyyy-mm-dd format
-    const regexPattern = /^\d{4}-\d{2}-\d{2}$/;
-
-    // Use regex test method to check if the string matches the pattern
-    return regexPattern.test(dateString);
-  }
-  function isValidDuration(duration) {
-    // Check if the duration is a number and within the range 0 to 600 (inclusive)
-    const numericValue = parseInt(duration, 10);
-    return !isNaN(numericValue) && numericValue >= 0 && numericValue <= 600;
+  // Ensure _id is a valid ObjectId
+  if (!mongoose.Types.ObjectId.isValid(_id)) {
+    return res.json("Invalid user ID.");
   }
 
   // If no date is provided, use the current date.
@@ -215,10 +214,13 @@ app.post("/api/users/:_id/exercises", async (req, res) => {
     // Format the date as yyyy-mm-dd
     date = `${year}-${month}-${day}`;
   }
+
   // Call to check if date is correctly formatted
   if (!isDateFormatValid(date))
     return res.json(`The date "${date}" is not in the correct format.`);
+
   if (!duration || !description) return res.json("Missing fields.");
+
   if (!isValidDuration(duration))
     return res.json(
       `The duration "${duration}" is not valid; must be in minutes`
@@ -226,8 +228,8 @@ app.post("/api/users/:_id/exercises", async (req, res) => {
 
   // Add the exercise to the specified user's record in the database.
   try {
-    const user = await User.findOne({ _id: _id });
-
+    const user = await User.findById({ _id });
+    
     if (!user) {
       return res.json("User not found.");
     }
@@ -242,30 +244,18 @@ app.post("/api/users/:_id/exercises", async (req, res) => {
     user.log.push(newExercise);
 
     await user.save();
+
+    const response = {
+      _id: user._id,
+      username: user.username,
+      description: newExercise.description,
+      duration: newExercise.duration,
+      date: new Date(newExercise.date).toDateString(),
+    };
+    res.json(response);
   } catch (error) {
     console.log("Error adding exercise: ", error);
     return res.json("Unable to add exercise.");
-  }
-
-  try {
-    const user = await User.findOne({ _id: _id });
-
-    if (!user) return res.json({ message: "User not found." });
-
-    // Get the last log entry
-    const lastLogEntry = user.log[user.log.length - 1];
-
-    // Return the user object including the newly added exercise information.
-    return res.json({
-      _id: user._id,
-      username: user.username,
-      date: lastLogEntry.date.toDateString(),
-      duration: lastLogEntry.duration,
-      description: lastLogEntry.description,
-    });
-  } catch (error) {
-    console.log("Error getting user last log data: ", error);
-    return res.json("Could not get user last log data.");
   }
 });
 
@@ -291,13 +281,6 @@ app.get("/api/users/:_id/logs", async (req, res) => {
 
   // Extract optional query parameters: from, to, limit
   const { from, to, limit } = req.query;
-
-  console.log(req.query);
-  const fromDate = new Date(from);
-  const toDate = new Date(to);
-
-  console.log(new Date(from));
-  console.log(new Date(to));
 
   try {
     const user = await User.findOne({ _id: userId });
