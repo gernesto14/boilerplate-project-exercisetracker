@@ -11,12 +11,28 @@ const app = express();
 const port = 3000;
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
+// CORS middleware
+app.use((req, res, next) => {
+  res.setHeader("Access-Control-Allow-Origin", "https://www.freecodecamp.org");
+  res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+  next();
+});
+
 // Set the 'public' folder as the location for serving static files
 app.use(express.static(path.join(__dirname, "public")));
 
 // Mounting the body-parser middleware for parsing JSON and URL-encoded bodies
 app.use(bodyParser.json());
 app.use(bodyParser.urlencoded({ extended: true }));
+
+// Middleware to log incoming requests
+app.use((req, res, next) => {
+  console.log(
+    `[${new Date().toISOString()}] ${req.ip} ${req.method} ${req.url}`
+  );
+  next();
+});
 
 async function connectToMongoDB() {
   try {
@@ -54,46 +70,44 @@ const User = mongoose.model("User", UserSchema);
 // Function to generate sample users and exercises
 const createSampleData = async () => {
   try {
-    // Create 5 sample users
-    const users = await User.create([
-      { username: "User1" },
-      { username: "User2" },
-      { username: "User3" },
-      { username: "User4" },
-      { username: "User5" },
-    ]);
+    // Create sample users
+    const user1 = await User.create({ username: "User1" });
+    const user2 = await User.create({ username: "User2" });
 
-    // Create 10 sample exercises for each user
-    for (const user of users) {
-      const exercises = [];
-      for (let i = 0; i < 10; i++) {
-        exercises.push({
-          userId: user._id,
-          description: `Exercise ${i + 1} for ${user.username}`,
-          duration: Math.floor(Math.random() * 60) + 1, // Random duration between 1 and 60 minutes
-          date: new Date(),
-        });
-      }
-      await Exercise.insertMany(exercises);
-    }
+    // Function to generate random date within a range
+    const getRandomDate = (startDate, endDate) => {
+      const start = new Date(startDate).getTime();
+      const end = new Date(endDate).getTime();
+      const randomTime = start + Math.random() * (end - start);
+      return new Date(randomTime);
+    };
 
     console.log("Sample data created successfully.");
   } catch (error) {
     console.error("Error creating sample data:", error);
-  } finally {
-    mongoose.disconnect();
+  }
+};
+
+// Connect to MongoDB and create sample data
+// createSampleData();
+
+const deleteAllExerciseLogs = async () => {
+  try {
+    // Delete all documents from the Exercise collection
+    await Exercise.deleteMany({});
+    console.log("All exercise logs deleted successfully.");
+  } catch (error) {
+    console.error("Error deleting exercise logs:", error);
   }
 };
 
 async function deleteMany() {
   // Delete many based on criteria
-  await User.deleteMany({ username: { $regex: /test/i } });
+  await User.deleteMany({ username: { $regex: /user/i } });
 }
 
 // deleteMany();
-
-// Connect to MongoDB and create sample data
-// createSampleData();
+// deleteAllExerciseLogs();
 
 app.get("/", (req, res) => {
   res.sendFile(__dirname + "/views/index.html");
@@ -201,7 +215,7 @@ app.post("/api/users/:_id/exercises", async (req, res) => {
     // Format the date as yyyy-mm-dd
     date = `${year}-${month}-${day}`;
   }
-  // Call to check if fate is correctly formatted
+  // Call to check if date is correctly formatted
   if (!isDateFormatValid(date))
     return res.json(`The date "${date}" is not in the correct format.`);
   if (!duration || !description) return res.json("Missing fields.");
@@ -245,13 +259,13 @@ app.post("/api/users/:_id/exercises", async (req, res) => {
     return res.json({
       _id: user._id,
       username: user.username,
-      date: lastLogEntry.date,
+      date: lastLogEntry.date.toDateString(),
       duration: lastLogEntry.duration,
       description: lastLogEntry.description,
     });
   } catch (error) {
-    console.log("Error getting user las log data: ", error);
-    return res.json("Could not get user las log data.");
+    console.log("Error getting user last log data: ", error);
+    return res.json("Could not get user last log data.");
   }
 });
 
@@ -259,24 +273,73 @@ app.post("/api/users/:_id/exercises", async (req, res) => {
 // GET "/api/users/:_id/logs"
 //
 ////////////////////////////////////////////////////////////////////////////////
-app.get("/api/users/:_id/logs", (req, res) => {
+app.get("/api/users/:_id/logs", async (req, res) => {
   // make a GET request to /api/users/:_id/logs to retrieve a full exercise log of any user.
   // A request to a user's log GET /api/users/:_id/logs returns a user object with a count property representing the number of exercises that belong to that user.
   // A GET request to /api/users/:_id/logs will return the user object with a log array of all the exercises added.
   // Each item in the log array that is returned from GET /api/users/:_id/logs is an object that should have a description, duration, and date properties.
-  // The description property of any object in the log array that is returned from GET /api/users/:_id/logs should be a string.
-  // The duration property of any object in the log array that is returned from GET /api/users/:_id/logs should be a number.
-  // The date property of any object in the log array that is returned from GET /api/users/:_id/logs should be a string. Use the dateString format of the Date API.
+  // The "description" property of any object in the log array that is returned from GET /api/users/:_id/logs should be a string.
+  // The "duration" property of any object in the log array that is returned from GET /api/users/:_id/logs should be a number.
+  // The "date" property of any object in the log array that is returned from GET /api/users/:_id/logs should be a string. Use the dateString format of the Date API.
   // You can add from, to and limit parameters to a GET /api/users/:_id/logs request to retrieve part of the log of any user. from and to are dates in yyyy-mm-dd format. limit is an integer of how many logs to send back.
 
   //GET /api/users/:_id/logs (Retrieve User's Exercise Log):
   // Extract the user _id and optional from, to, and limit parameters from the URL.
-  // Retrieve the user's exercise log from the database.
-  // If from and to parameters are provided, filter the log by the date range.
-  // If limit is provided, limit the number of log entries returned.
-  // Return the user object with the log array and a count of the total exercises.
 
-  res.json("GET- /api/users/:_id/logs");
+  const userId = req.params._id;
+  // Retrieve the user's exercise log from the database.
+
+  // Extract optional query parameters: from, to, limit
+  const { from, to, limit } = req.query;
+
+  console.log(req.query);
+  const fromDate = new Date(from);
+  const toDate = new Date(to);
+
+  console.log(new Date(from));
+  console.log(new Date(to));
+
+  try {
+    const user = await User.findOne({ _id: userId });
+    if (!user) {
+      return res.json("User not found.");
+    }
+
+    // Apply filtering and limiting to the logs array
+    let logs = user.log;
+
+    // If from and to parameters are provided, filter the log by the date range.
+    if (from && to) {
+      logs = logs.filter((log) => {
+        const logDate = new Date(log.date);
+        return logDate >= new Date(from) && logDate <= new Date(to);
+      });
+    }
+
+    // If limit is provided, limit the number of log entries returned.
+    if (limit) {
+      logs = logs.slice(0, parseInt(limit));
+    }
+
+    // Number of exercises logged
+    const count = logs.length;
+
+    // Extract logs from the user and format the date
+    logs = logs.map((log) => ({
+      description: log.description,
+      duration: log.duration,
+      date: new Date(log.date).toDateString(), // Convert date to a readable format
+    }));
+
+    // Construct the response object
+    const userLog = { _id: userId, username: user.username, count, log: logs };
+
+    // Return the user object with the log array and a count of the total exercises.
+    return res.json(userLog);
+  } catch (error) {
+    console.log("Error getting user log data: ", error);
+    return res.json("Could not get user las log data.");
+  }
 });
 
 const listener = app.listen(process.env.PORT, () => {
