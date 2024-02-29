@@ -173,14 +173,24 @@ app.get("/api/users", async (req, res) => {
 // POST "/api/users/:_id/exercises"
 //
 ////////////////////////////////////////////////////////////////////////////////
-// Check date is correctly formatted
-function isDateFormatValid(dateString) {
-  // Define a regex pattern for yyyy-mm-dd format
-  const regexPattern = /^\d{4}-\d{2}-\d{2}$/;
 
-  // Use regex test method to check if the string matches the pattern
-  return regexPattern.test(dateString);
-}
+// Function to check and format the date
+const checkDate = (date) => {
+  if (!date) {
+    return new Date(Date.now()).toDateString();
+  } else {
+    const parts = date.split("-");
+    const year = parseInt(parts[0]);
+    const month = parseInt(parts[1]) - 1;
+    const day = parseInt(parts[2]);
+
+    const utcDate = new Date(Date.UTC(year, month, day));
+    return new Date(
+      utcDate.getTime() + utcDate.getTimezoneOffset() * 60000
+    ).toDateString();
+  }
+};
+
 function isValidDuration(duration) {
   // Check if the duration is a number and within the range 0 to 600 (inclusive)
   const numericValue = parseInt(duration, 10);
@@ -201,23 +211,7 @@ app.post("/api/users/:_id/exercises", async (req, res) => {
     return res.json("Invalid user ID.");
   }
 
-  // If no date is provided, use the current date.
-  if (!date) {
-    // Create a new Date object for the current date
-    const currentDate = new Date();
-
-    // Extract the year, month, and day components
-    const year = currentDate.getFullYear();
-    const month = String(currentDate.getMonth() + 1).padStart(2, "0"); // Month is zero-based
-    const day = String(currentDate.getDate()).padStart(2, "0");
-
-    // Format the date as yyyy-mm-dd
-    date = `${year}-${month}-${day}`;
-  }
-
-  // Call to check if date is correctly formatted
-  if (!isDateFormatValid(date))
-    return res.json(`The date "${date}" is not in the correct format.`);
+  date = checkDate(date);
 
   if (!duration || !description) return res.json("Missing fields.");
 
@@ -229,7 +223,7 @@ app.post("/api/users/:_id/exercises", async (req, res) => {
   // Add the exercise to the specified user's record in the database.
   try {
     const user = await User.findById({ _id });
-    
+
     if (!user) {
       return res.json("User not found.");
     }
@@ -252,6 +246,7 @@ app.post("/api/users/:_id/exercises", async (req, res) => {
       duration: newExercise.duration,
       date: new Date(newExercise.date).toDateString(),
     };
+    
     res.json(response);
   } catch (error) {
     console.log("Error adding exercise: ", error);
@@ -293,32 +288,40 @@ app.get("/api/users/:_id/logs", async (req, res) => {
 
     // If from and to parameters are provided, filter the log by the date range.
     if (from && to) {
+      const fromDate = new Date(from);
+      const toDate = new Date(to);
       logs = logs.filter((log) => {
         const logDate = new Date(log.date);
-        return logDate >= new Date(from) && logDate <= new Date(to);
+        return logDate >= fromDate && logDate <= toDate;
       });
     }
 
     // If limit is provided, limit the number of log entries returned.
     if (limit) {
-      logs = logs.slice(0, parseInt(limit));
+      logs = logs.slice(0, parseInt(limit, 10));
     }
 
-    // Number of exercises logged
-    const count = logs.length;
-
-    // Extract logs from the user and format the date
-    logs = logs.map((log) => ({
+    const formattedLogs = logs.map((log) => ({
       description: log.description,
       duration: log.duration,
-      date: new Date(log.date).toDateString(), // Convert date to a readable format
+      date: log.date.toDateString(), // Ensure each date is a string in the correct format
     }));
 
-    // Construct the response object
-    const userLog = { _id: userId, username: user.username, count, log: logs };
+    // Optionally: Log each formatted log's date to the console
+    formattedLogs.forEach((log, index) => {
+      console.log(index);
+      console.log(log.date, typeof log.date);
+    });
+
+    const response = {
+      _id: userId,
+      username: user.username,
+      count: formattedLogs.length,
+      log: formattedLogs,
+    };
 
     // Return the user object with the log array and a count of the total exercises.
-    return res.json(userLog);
+    return res.json(response);
   } catch (error) {
     console.log("Error getting user log data: ", error);
     return res.json("Could not get user las log data.");
